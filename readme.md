@@ -1,0 +1,8 @@
+# Descrição
+
+Construiremos algoritmos relativos aos processos apresentados pelo professor da disciplina de Teoria da Informação e Codificação de Fonte.
+A fim de facilitar o desenvolvimento, utilizaremos Inteligência Artificial para nos guiar à rápida conclusão. 
+
+
+
+
