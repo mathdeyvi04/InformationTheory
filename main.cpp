@@ -23,7 +23,8 @@ int main(int argc, char* argv[]) {
     options.add_options()
         ("i,inputfile", "Inserir Nome ou Caminho do Arquivo de Entrada", cxxopts::value<std::string>())
         ("o,outputfile", "Inserir Nome ou Caminho do Arquivo de Saída", cxxopts::value<std::string>())
-        ("n,number", "Insira o número correspondente ao algoritmo de compressão", cxxopts::value<int>())
+        ("n,number", "Insira o número correspondente ao algoritmo de compressão. (Default: 0)", cxxopts::value<int>())
+        ("m,mode", "Modo de Operação, 0 - Comprimir, 1 - Descomprimir, 2 - Comprimir e Descomprimir. (Default: 0)", cxxopts::value<int>())
         ("h,help", "Mostrar ajuda")
     ;
 
@@ -37,30 +38,51 @@ int main(int argc, char* argv[]) {
         std::cout << "Erro, deve inserir um arquivo para compactação" << std::endl;
         return 1;
     }
+    std::string inputfilename {result["inputfile"].as<std::string>()};
     std::string outputfilename {"a.out"};
     if(result.count("outputfile")) {
         outputfilename = result["outputfile"].as<std::string>();
     }
+    if(inputfilename == outputfilename) {
+        std::cout << "Erro, arquivos de entrada e de saída não podem ter o mesmo caminho" << std::endl;
+        return 1;
+    }
+
     int idx {0};
     if(result.count("number")) {
         idx = result["number"].as<int>();
     }
+    int mode {0};
+    if(result.count("mode")) {
+        mode = result["mode"].as<int>();
+    }
 
     // Criamos variáveis relativas ao arquivo de entrada e de saída
-    File inputfile {result["inputfile"].as<std::string>(), true};
-    File outputfile {outputfilename, false};
-    File probably_inputfile {"probably_inputfile.txt", false};
+    File inputfile  {inputfilename, true};
+    std::vector<uint8_t> read_from_input = inputfile.read();
 
     std::unique_ptr<CompressionAlgorithm> algorithm {get_algorithm(idx)};
 
-    // Realizamos a compressão de teste
-    std::vector<uint8_t> data = algorithm->apply(inputfile.read());
+    if(mode == 2) {
+        std::vector<uint8_t> data = algorithm->apply(read_from_input);
+        File outputfile {outputfilename, false};
+        outputfile.write(data);
+
+        // Há garantia que a decompactação funcionará
+        File probably_inputfile {"probably_inputfile.txt", false};
+        data = algorithm->deapply(data);
+        probably_inputfile.write(data);
+        return 0;
+    }
+
+    std::vector<uint8_t> data = (mode == 0) ? algorithm->apply(read_from_input) : algorithm->deapply(read_from_input);
+    if(read_from_input.size() != 0 && data.size() == 0) {
+        // Esse erro é muito mais comum em situações de descompactação.
+        std::cout << "Houve erro na descompactação. Talvez não seja um arquivo .HF" << std::endl;
+        return 1;
+    }
+    File outputfile {outputfilename, false};
     outputfile.write(data);
-
-    // Realizamos a descompressão de teste
-    data = algorithm->deapply(data);
-    probably_inputfile.write(data);
-
     return 0;
 }
 

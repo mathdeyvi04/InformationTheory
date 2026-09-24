@@ -5,6 +5,9 @@
 #include <fstream>
 #include <array>
 #include <vector>
+#include <functional>
+#include <limits>
+#include <utility>
 
 class CompressionAlgorithm {
 public:

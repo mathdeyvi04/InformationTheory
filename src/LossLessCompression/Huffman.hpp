@@ -5,252 +5,469 @@
 class Huffman : public CompressionAlgorithm {
 private:
 
-    /**
-     * @brief Define a origem das frequências utilizadas pelo algoritmo.
-     */
-    enum class Mode {
-        DEFAULT,
-        PERSONAL
-    };
+    /** @brief Valor reservado para representar um filho inexistente. */
+    static constexpr uint16_t INVALID_NODE {0xFFFF};
+
+    /** @brief Quantidade Máxima de Bytes Possíveis. */
+    static constexpr size_t MAX_POSSIBLE_BYTES {256};
+
+    /** @brief Quantidade máxima de nós em uma árvore com 256 símbolos. */
+    static constexpr uint16_t MAX_TREE_NODES {2 * MAX_POSSIBLE_BYTES - 1};
+
+    /** @brief Quantidade máxima de bits necessária para armazenar todos os códigos. */
+    static constexpr uint16_t MAX_CODE_BITS {MAX_POSSIBLE_BYTES * (MAX_POSSIBLE_BYTES - 1) / 2};
+
+    /** @brief Quantidade máxima de bytes necessária para armazenar todos os códigos. */
+    static constexpr uint16_t MAX_CODE_BYTES {(MAX_CODE_BITS + 7) / 8};
+
+    /** @brief Versão do formato binário utilizado pelo Huffman. */
+    static constexpr uint8_t FORMAT_VERSION {2};
+
+    /** @brief Tamanho fixo do cabeçalho em bytes. */
+    static constexpr size_t HEADER_SIZE {13};
 
     /**
-     * @brief Modo default de geração das frequências.
-     */
-    Mode m_mode {Mode::PERSONAL};
-
-    /**
-     * @brief Possível arquivo que conterá as frequências padrão.
-     */
-    std::ifstream m_possible_file_freq {};
-
-    /**
-     * @brief Frequência de cada um dos 256 possíveis valores de byte.
-     *
-     * O índice representa o byte e o valor representa sua frequência, a
-     * qual pode ser bem alta, por isso colocamos em uint64_t.
-     */
-    std::array<uint64_t, 256> m_freq {};
-
-    /**
-     * @brief Representa um nó da árvore de Huffman.
-     *
-     * Nós folha possuem um byte válido e não possuem filhos.
-     * Nós internos possuem apenas os índices dos filhos.
-     */
-    struct HuffmanNode {
-        uint64_t freq {};
-        uint8_t byte {};
-        int left {-1};
-        int right {-1};
-    };
-
-    /**
-     * @brief Compara nós pela frequência para a priority_queue.
-     *
-     * Faz com que o nó de menor frequência fique no topo da fila.
-     */
-    struct NodeComparer {
-        const std::vector<HuffmanNode>* nodes;
-
-        bool operator()(int a, int b) const {
-            // A priority_queue coloca o maior elemento no topo.
-            // Aqui, desejamos o contrário.
-            const HuffmanNode& node_a = (*nodes)[a];
-            const HuffmanNode& node_b = (*nodes)[b];
-
-            if(node_a.freq != node_b.freq) {
-                return node_a.freq > node_b.freq;
-            }
-
-            return a > b;
-        }
-    };
-
-    /**
-     * @brief Armazena todos os nós da árvore de Huffman.
-     */
-    std::vector<HuffmanNode> m_nodes {};
-
-    /**
-     * @brief Representará o índice da raiz da árvore
-     */
-    int m_root {};
-
-    /**
-     * @brief Quantidade de símbolos, (bytes), diferentes utilizada pela árvore
+     * @brief Quantitativo de símbolos (bytes) presente no arquivo
      */
     uint16_t m_symbol_count {};
 
     /**
-     * @brief Constrói a árvore de Huffman a partir das frequências.
+     * @brief Representa um nó da árvore de Huffman.
      *
-     * @return Índice do nó raiz ou -1 caso não existam dados.
+     * A árvore não armazena mais as frequências depois de construída.
+     * Os filhos são identificados por índices de 16 bits.
      */
-    int build_tree() {
+    struct HuffmanNode {
+        uint16_t left  {INVALID_NODE};
+        uint16_t right {INVALID_NODE};
+        uint8_t byte   {};
+    };
 
-        m_nodes.clear();
-        std::priority_queue<
-            int,
-            std::vector<int>,
-            NodeComparer
-        > queue {NodeComparer{&m_nodes}};
+    /**
+     * @brief Armazena os nós da árvore em memória contígua.
+     */
+    std::array<HuffmanNode, MAX_TREE_NODES> m_nodes {};
 
-        for(uint16_t byte = 0; byte < 256; ++byte) {
+    /**
+     * @brief Quantidade de nós atualmente utilizados.
+     */
+    uint16_t m_node_count {};
 
-            // Se a frequência for zero, não precisamos inserir na árvore.
-            if(!m_freq[byte]) {
-                continue;
-            }
-            ++m_symbol_count;
+    /**
+     * @brief Descreve a localização de um código no buffer de bits.
+     */
+    struct CodeInfo {
+        uint16_t offset {};
+        uint8_t  length {};
+    };
 
-            const int index = static_cast<int>(m_nodes.size());
-
-            m_nodes.push_back(
-                {
-                    m_freq[byte],
-                    static_cast<uint8_t>(byte)
-                }
-            );
-
-            queue.push(index);
-        }
-
-        // Arquivo vazio
-        if(queue.empty()) {
-            return -1;
-        }
-
-        // Arquivo contendo apenas um símbolo.
-        if(queue.size() == 1) {
-            return queue.top();
-        }
-
-        /*
-         * Enquanto houver mais de um nó na fila:
-         *
-         *     1. Pegamos o menor.
-         *     2. Pegamos o segundo menor.
-         *     3. Criamos um pai contendo os dois.
-         *     4. Inserimos o pai novamente na fila.
-         *
-         * Ao final sobrará apenas a raiz.
-         */
-        while(queue.size() > 1) {
-
-            const int left = queue.top();
-            queue.pop();
-
-            const int right = queue.top();
-            queue.pop();
-
-            const int parent = static_cast<int>(m_nodes.size());
-
-            m_nodes.push_back(
-                {
-                    m_nodes[left].freq + m_nodes[right].freq,
-                    0,
-                    left,
-                    right
-                }
-            );
-
-            queue.push(parent);
-        }
-
-        return queue.top();
+    /**
+     * @brief Verifica se um nó é folha.
+     *
+     * @param node Nó que será analisado.
+     *
+     * @return true caso seja folha.
+     */
+    static bool is_leaf(
+        const HuffmanNode& node
+    ) {
+        return
+            node.left == INVALID_NODE &&
+            node.right == INVALID_NODE;
     }
 
     /**
-     * @brief Gera o código Huffman de cada byte percorrendo a árvore.
+     * @brief Constrói a árvore de Huffman a partir de histogram.
+     *
+     * A priority_queue armazena a frequência separadamente da árvore,
+     * evitando manter uint64_t dentro de cada nó.
+     *
+     * @return Índice da raiz ou INVALID_NODE caso não existam símbolos.
+     */
+    uint16_t build_tree(const std::array<uint64_t, 256>& histogram) {
+
+        m_node_count = 0;
+
+        using QueueEntry = std::pair<uint64_t, uint16_t>;
+
+        /*
+         * std::greater<> faz com que o menor par fique no topo.
+         *
+         * O primeiro elemento do par é a frequência.
+         * O segundo é o índice do nó e serve como desempate determinístico.
+         */
+        std::priority_queue<
+            QueueEntry,
+            std::vector<QueueEntry>,
+            std::greater<>
+        > queue;
+
+        for(uint16_t byte = 0; byte < 256; ++byte) {
+
+            // Não vamos inserir bytes com frequência 0
+            if(!histogram[byte]) {
+                continue;
+            }
+
+            if(m_node_count >= MAX_TREE_NODES) {
+                return INVALID_NODE;
+            }
+
+            ++m_symbol_count;
+            const uint16_t index = m_node_count++;
+
+            m_nodes[index] = {
+                INVALID_NODE,
+                INVALID_NODE,
+                static_cast<uint8_t>(byte)
+            };
+
+            queue.push({
+                histogram[byte],
+                index
+            });
+        }
+
+        if(queue.empty()) {
+            return INVALID_NODE;
+        }
+
+        /*
+         * Uma árvore contendo apenas um símbolo possui
+         * somente uma folha, que será a própria raiz.
+         */
+        if(queue.size() == 1) {
+            return queue.top().second;
+        }
+
+        /*
+         * A cada iteração:
+         *
+         * 1. Retiramos o menor nó.
+         * 2. Retiramos o segundo menor.
+         * 3. Criamos o pai dos dois.
+         * 4. Inserimos o pai novamente na fila.
+         */
+        while(queue.size() > 1) {
+
+            const QueueEntry left = queue.top();
+            queue.pop();
+
+            const QueueEntry right = queue.top();
+            queue.pop();
+
+            if(m_node_count >= MAX_TREE_NODES) {
+                return INVALID_NODE;
+            }
+
+            const uint16_t parent = m_node_count++;
+
+            m_nodes[parent] = {
+                left.second,
+                right.second,
+                0
+            };
+
+            queue.push({
+                left.first + right.first,
+                parent
+            });
+        }
+
+        return queue.top().second;
+    }
+
+    /**
+     * @brief Define um bit no armazenamento compacto dos códigos.
+     *
+     * @param bits Buffer contendo os códigos.
+     * @param position Posição do bit.
+     * @param value Valor do bit.
+     */
+    static void set_code_bit(
+        std::array<uint8_t, MAX_CODE_BYTES>& bits,
+        uint16_t position,
+        bool value
+    ) {
+
+        if(value) {
+
+            bits[position / 8] |=
+                static_cast<uint8_t>(
+                    1u << (7 - position % 8)
+                );
+        }
+    }
+
+    /**
+     * @brief Lê um bit do armazenamento compacto dos códigos.
+     *
+     * @param bits Buffer contendo os códigos.
+     * @param position Posição do bit.
+     *
+     * @return Valor do bit.
+     */
+    static bool get_code_bit(
+        const std::array<uint8_t, MAX_CODE_BYTES>& bits,
+        uint16_t position
+    ) {
+
+        return (
+            bits[position / 8] &
+            static_cast<uint8_t>(
+                1u << (7 - position % 8)
+            )
+        ) != 0;
+    }
+
+    /**
+     * @brief Gera os códigos Huffman dos símbolos da árvore.
+     *
+     * Os códigos são armazenados em um único buffer de bits,
+     * evitando 256 objetos std::vector<bool>.
      *
      * @param node Índice do nó atual.
-     * @param code Código construído até o momento.
-     * @param codes Tabela contendo o código de cada byte.
+     * @param current_code Caminho atual na árvore.
+     * @param current_length Tamanho do caminho atual.
+     * @param codes Tabela de lookup dos códigos.
+     * @param code_bits Buffer compacto contendo todos os códigos.
+     * @param code_bit_count Quantidade de bits já utilizados no buffer.
+     *
+     * @return true caso a geração tenha sido concluída com sucesso.
      */
-    void generate_codes(
-        int node,
-        std::vector<bool>& code,
-        std::array<std::vector<bool>, 256>& codes
+    bool generate_codes(
+        uint16_t node,
+        std::array<uint8_t, 256>& current_code,
+        uint16_t current_length,
+        std::array<CodeInfo, 256>& codes,
+        std::array<uint8_t, MAX_CODE_BYTES>& code_bits,
+        uint16_t& code_bit_count
     ) const {
 
         const HuffmanNode& current = m_nodes[node];
 
-        // Nó folha: encontramos o código completo deste byte.
-        if(current.left == -1 && current.right == -1) {
+        /*
+         * Encontramos um símbolo.
+         */
+        if(is_leaf(current)) {
 
             /*
-             * Caso especial:
-             * se existir apenas um byte diferente no arquivo,
-             * seu código seria vazio. Nesse caso utilizamos "0".
+             * Uma árvore com somente um símbolo teria
+             * um código vazio. Utilizamos 0 nesse caso.
              */
-            if(code.empty()) {
-                code.push_back(false);
+            if(current_length == 0) {
+
+                current_code[0] = 0;
+                current_length = 1;
             }
 
-            codes[current.byte] = code;
+            if(
+                current_length > MAX_CODE_BITS ||
+                code_bit_count >
+                    MAX_CODE_BITS - current_length
+            ) {
+                return false;
+            }
+
+            const uint16_t offset = code_bit_count;
+
+            codes[current.byte] = {
+                offset,
+                static_cast<uint8_t>(current_length)
+            };
+
+            /*
+             * Copia o código atual para o buffer compacto.
+             */
+            for(uint16_t i = 0; i < current_length; ++i) {
+
+                set_code_bit(
+                    code_bits,
+                    code_bit_count++,
+                    current_code[i] != 0
+                );
+            }
+
+            return true;
+        }
+
+        /*
+         * Esquerda representa o bit 0.
+         */
+        if(current.left != INVALID_NODE) {
+
+            current_code[current_length] = 0;
+
+            if(!generate_codes(
+                current.left,
+                current_code,
+                static_cast<uint16_t>(current_length + 1),
+                codes,
+                code_bits,
+                code_bit_count
+            )) {
+                return false;
+            }
+        }
+
+        /*
+         * Direita representa o bit 1.
+         */
+        if(current.right != INVALID_NODE) {
+
+            current_code[current_length] = 1;
+
+            if(!generate_codes(
+                current.right,
+                current_code,
+                static_cast<uint16_t>(current_length + 1),
+                codes,
+                code_bits,
+                code_bit_count
+            )) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief Adiciona um bit ao fluxo serializado da árvore.
+     *
+     * @param data Vetor que contém a árvore serializada.
+     * @param bit_position Posição do próximo bit.
+     * @param value Valor do bit.
+     */
+    static void append_tree_bit(
+        std::vector<uint8_t>& data,
+        size_t& bit_position,
+        bool value
+    ) {
+
+        /*
+         * Um novo byte é criado a cada 8 bits.
+         */
+        if(bit_position % 8 == 0) {
+            data.push_back(0);
+        }
+
+        if(value) {
+
+            data.back() |=
+                static_cast<uint8_t>(
+                    1u << (7 - bit_position % 8)
+                );
+        }
+
+        ++bit_position;
+    }
+
+    /**
+     * @brief Serializa a árvore em pré-ordem.
+     *
+     * Nó interno = 0
+     * Nó folha   = 1 + byte
+     *
+     * @param node Índice do nó atual.
+     * @param data Vetor que receberá a árvore.
+     * @param bit_position Posição atual dentro da serialização.
+     */
+    void serialize_tree(
+        uint16_t node,
+        std::vector<uint8_t>& data,
+        size_t& bit_position
+    ) const {
+
+        const HuffmanNode& current = m_nodes[node];
+
+        /*
+         * Folha:
+         *
+         * 1 bit  -> marcador 1
+         * 8 bits -> byte armazenado
+         */
+        if(is_leaf(current)) {
+
+            append_tree_bit(
+                data,
+                bit_position,
+                true
+            );
+
+            for(int bit = 7; bit >= 0; --bit) {
+
+                append_tree_bit(
+                    data,
+                    bit_position,
+                    (current.byte & (1u << bit)) != 0
+                );
+            }
+
             return;
         }
 
-        // Caminho para a esquerda representa o bit 0.
-        if(current.left != -1) {
+        /*
+         * Nó interno:
+         *
+         * 1 bit -> marcador 0
+         */
+        append_tree_bit(
+            data,
+            bit_position,
+            false
+        );
 
-            code.push_back(false);
+        serialize_tree(
+            current.left,
+            data,
+            bit_position
+        );
 
-            generate_codes(
-                current.left,
-                code,
-                codes
-            );
-
-            code.pop_back();
-        }
-
-        // Caminho para a direita representa o bit 1.
-        if(current.right != -1) {
-
-            code.push_back(true);
-
-            generate_codes(
-                current.right,
-                code,
-                codes
-            );
-
-            code.pop_back();
-        }
+        serialize_tree(
+            current.right,
+            data,
+            bit_position
+        );
     }
 
-    // Little endian é uma convenção de ordem de bytes na memória:
-    // o byte menos significativo (LSB, least significant byte) é
-    // armazenado primeiro (no menor endereço)
-
     /**
-     * @brief Adiciona um inteiro de 16 bits ao vetor em little-endian.
+     * @brief Adiciona um inteiro de 16 bits em little-endian.
      *
      * @param data Vetor que receberá os bytes.
-     * @param value Valor que será serializado.
+     * @param value Valor a ser serializado.
      */
     static void append_uint16(
         std::vector<uint8_t>& data,
         uint16_t value
     ) {
-        data.push_back(static_cast<uint8_t>(value));
-        data.push_back(static_cast<uint8_t>(value >> 8));
+
+        data.push_back(
+            static_cast<uint8_t>(value)
+        );
+
+        data.push_back(
+            static_cast<uint8_t>(value >> 8)
+        );
     }
 
     /**
-     * @brief Adiciona um inteiro de 64 bits ao vetor em little-endian.
+     * @brief Adiciona um inteiro de 64 bits em little-endian.
      *
      * @param data Vetor que receberá os bytes.
-     * @param value Valor que será serializado.
+     * @param value Valor a ser serializado.
      */
     static void append_uint64(
         std::vector<uint8_t>& data,
         uint64_t value
     ) {
+
         for(int i = 0; i < 8; ++i) {
+
             data.push_back(
-                static_cast<uint8_t>(value >> (i * 8))
+                static_cast<uint8_t>(
+                    value >> (i * 8)
+                )
             );
         }
     }
@@ -258,44 +475,50 @@ private:
     /**
      * @brief Lê um inteiro de 16 bits em little-endian.
      *
-     * @param data Vetor contendo os dados.
+     * @param data Dados de entrada.
      * @param position Posição atual da leitura.
-     * @param value Variável que receberá o valor lido.
+     * @param value Variável que receberá o valor.
      *
-     * @return true caso a leitura seja válida.
+     * @return true caso existam bytes suficientes.
      */
     static bool read_uint16(
         const std::vector<uint8_t>& data,
         size_t& position,
         uint16_t& value
     ) {
+
         if(position + 2 > data.size()) {
             return false;
         }
 
         value =
             static_cast<uint16_t>(data[position]) |
-           (static_cast<uint16_t>(data[position + 1]) << 8);
+            (
+                static_cast<uint16_t>(
+                    data[position + 1]
+                ) << 8
+            );
 
         position += 2;
 
         return true;
     }
 
-     /**
+    /**
      * @brief Lê um inteiro de 64 bits em little-endian.
      *
-     * @param data Vetor contendo os dados.
+     * @param data Dados de entrada.
      * @param position Posição atual da leitura.
-     * @param value Variável que receberá o valor lido.
+     * @param value Variável que receberá o valor.
      *
-     * @return true caso a leitura seja válida.
+     * @return true caso existam bytes suficientes.
      */
     static bool read_uint64(
         const std::vector<uint8_t>& data,
         size_t& position,
         uint64_t& value
     ) {
+
         if(position + 8 > data.size()) {
             return false;
         }
@@ -303,9 +526,11 @@ private:
         value = 0;
 
         for(int i = 0; i < 8; ++i) {
+
             value |=
-                static_cast<uint64_t>(data[position + i])
-                << (i * 8);
+                static_cast<uint64_t>(
+                    data[position + i]
+                ) << (i * 8);
         }
 
         position += 8;
@@ -313,204 +538,444 @@ private:
         return true;
     }
 
-public:
-
     /**
-     * @brief Inicializa o algoritmo e tenta carregar as frequências padrão.
+     * @brief Lê um bit da árvore serializada.
+     *
+     * @param data Dados contendo a árvore.
+     * @param tree_start Offset onde começa a árvore.
+     * @param tree_bit_count Quantidade válida de bits da árvore.
+     * @param bit_position Posição atual da leitura.
+     * @param value Variável que receberá o bit.
+     *
+     * @return true caso a leitura seja válida.
      */
-    Huffman() {
+    static bool read_tree_bit(
+        const std::vector<uint8_t>& data,
+        size_t tree_start,
+        uint16_t tree_bit_count,
+        uint16_t& bit_position,
+        bool& value
+    ) {
 
-        m_possible_file_freq.open(
-            "./src/LossLessCompression/vector_freq.txt",
-            std::ios::binary
-        );
-
-        if(!m_possible_file_freq.is_open()) {
-            // Caso não exista, então continuamos no modo PERSONAL
-            return;
+        if(bit_position >= tree_bit_count) {
+            return false;
         }
 
-        m_mode = Mode::DEFAULT;
+        const size_t byte_position =
+            tree_start + bit_position / 8;
 
-        for(int i = 0; i < 256; ++i) {
-
-            if(!(m_possible_file_freq >> m_freq[i])) {
-                // Observe que serão lidos as N linhas do arquivo.
-                // Caso N < 256, ele assumirá o valor 0 para os demais 256 - N elementos.
-                ++m_symbol_count;
-                break;
-            }
+        if(byte_position >= data.size()) {
+            return false;
         }
 
-        /*
-         * Constrói a árvore utilizando o vetor de frequências
-         * que já temos neste ponto.
-         */
-        m_root = build_tree();
+        value =
+            (
+                data[byte_position] &
+                static_cast<uint8_t>(
+                    1u << (7 - bit_position % 8)
+                )
+            ) != 0;
+
+        ++bit_position;
+
+        return true;
     }
 
     /**
-     * @brief Comprime os dados utilizando o algoritmo de Huffman.
+     * @brief Reconstrói a árvore a partir de sua representação binária.
      *
-     * As frequências são utilizadas para construir a árvore.
-     * Em seguida, cada byte recebe seu código Huffman e os bits
-     * resultantes são compactados em bytes.
+     * A representação utiliza pré-ordem:
      *
-     * @param data Dados originais que serão comprimidos.
+     * 0       -> nó interno
+     * 1 + byte -> folha
      *
-     * @return Dados comprimidos em formato binário.
+     * @param data Dados contendo a árvore serializada.
+     * @param tree_start Offset onde começa a árvore.
+     * @param tree_bit_count Quantidade de bits da árvore.
+     * @param bit_position Posição atual da leitura.
+     * @param seen_bytes Símbolos já encontrados.
+     * @param leaf_count Quantidade de folhas encontradas.
+     *
+     * @return Índice do nó reconstruído ou INVALID_NODE em caso de erro.
+     */
+    uint16_t deserialize_tree(
+        const std::vector<uint8_t>& data,
+        size_t tree_start,
+        uint16_t tree_bit_count,
+        uint16_t& bit_position,
+        std::array<bool, 256>& seen_bytes,
+        uint16_t& leaf_count
+    ) {
+
+        bool leaf_marker = false;
+
+        if(!read_tree_bit(
+            data,
+            tree_start,
+            tree_bit_count,
+            bit_position,
+            leaf_marker
+        )) {
+            return INVALID_NODE;
+        }
+
+        /*
+         * Folha.
+         */
+        if(leaf_marker) {
+
+            uint8_t byte = 0;
+
+            for(int bit = 7; bit >= 0; --bit) {
+
+                bool value = false;
+
+                if(!read_tree_bit(
+                    data,
+                    tree_start,
+                    tree_bit_count,
+                    bit_position,
+                    value
+                )) {
+                    return INVALID_NODE;
+                }
+
+                if(value) {
+                    byte |= static_cast<uint8_t>(1u << bit);
+                }
+            }
+
+            /*
+             * Um mesmo byte não pode aparecer duas vezes
+             * como folha da árvore.
+             */
+            if(seen_bytes[byte]) {
+                return INVALID_NODE;
+            }
+
+            if(leaf_count >= 256) {
+                return INVALID_NODE;
+            }
+
+            if(m_node_count >= MAX_TREE_NODES) {
+                return INVALID_NODE;
+            }
+
+            const uint16_t node = m_node_count++;
+
+            m_nodes[node] = {
+                INVALID_NODE,
+                INVALID_NODE,
+                byte
+            };
+
+            seen_bytes[byte] = true;
+            ++leaf_count;
+
+            return node;
+        }
+
+        /*
+         * Nó interno.
+         */
+        if(m_node_count >= MAX_TREE_NODES) {
+            return INVALID_NODE;
+        }
+
+        const uint16_t node = m_node_count++;
+
+        const uint16_t left = deserialize_tree(
+            data,
+            tree_start,
+            tree_bit_count,
+            bit_position,
+            seen_bytes,
+            leaf_count
+        );
+
+        if(left == INVALID_NODE) {
+            return INVALID_NODE;
+        }
+
+        const uint16_t right = deserialize_tree(
+            data,
+            tree_start,
+            tree_bit_count,
+            bit_position,
+            seen_bytes,
+            leaf_count
+        );
+
+        if(right == INVALID_NODE) {
+            return INVALID_NODE;
+        }
+
+        m_nodes[node] = {
+            left,
+            right,
+            0
+        };
+
+        return node;
+    }
+
+public:
+
+    /**
+     * @brief Comprime os dados utilizando Huffman.
+     *
+     * O formato produzido contém:
+     *
+     * 2 bytes -> magic "HF"
+     * 1 byte  -> versão
+     * 2 bytes -> quantidade de bits da árvore
+     * 8 bytes -> tamanho original
+     * N bytes -> árvore serializada
+     * N bytes -> payload Huffman
+     *
+     * @param data Dados originais.
+     *
+     * @return Dados comprimidos.
      */
     std::vector<uint8_t> apply(
         const std::vector<uint8_t>& data
     ) override {
 
         /*
-         * No modo PERSONAL, as frequências, árvore e raiz precisam ser calculadas
-         * a partir dos dados recebidos.
+         * O caso vazio possui somente o header.
          */
-        if(m_mode == Mode::PERSONAL) {
-
-            m_freq.fill(0);
-            for(uint8_t byte : data) {
-                ++m_freq[byte];
-            }
-
-            /*
-             * A árvore pertence à execução atual.
-             * Portanto, removemos os nós da execução anterior.
-             */
-            m_nodes.clear();
-
-            /*
-             * Constrói a árvore utilizando o vetor de frequências
-             * que já temos neste ponto.
-             */
-            m_root = build_tree();
-
-            if(m_root == -1) {
-
-                if(m_mode == Mode::PERSONAL) {
-                    m_freq.fill(0);
-                }
-
-                return {};
-            }
-        }
-
-        /*
-         * Para cada um dos 256 possíveis bytes, armazenaremos
-         * seu respectivo código Huffman.
-         */
-        std::array<std::vector<bool>, 256> codes {};
-
-        std::vector<bool> current_code;
-
-        /*
-         * Percorre a árvore a partir da raiz para descobrir
-         * o código Huffman de cada símbolo.
-         */
-        generate_codes(
-            m_root,
-            current_code,
-            codes
-        );
-
-        /*
-         * Aqui finalmente aplicamos os códigos aos dados originais.
-         *
-         * Os bits são acumulados em current_byte.
-         * Quando tivermos 8 bits, ele é colocado no vetor de saída.
-         */
-        std::vector<uint8_t> compressed;
-
-        /*
-         * O cabeçalho possui:
-         *
-         * 2 bytes -> magic
-         * 1 byte  -> versão
-         * 2 bytes -> quantidade de símbolos
-         * 8 bytes -> tamanho original
-         *
-         * Cada símbolo ocupa:
-         *
-         * 1 byte  -> símbolo
-         * 8 bytes -> frequência
-         */
-        compressed.reserve(
-            13 +
-            static_cast<size_t>(m_symbol_count) * 9 +
-            data.size()
-        );
-
-        // Magic: "HF"
-        compressed.push_back('H');
-        compressed.push_back('F');
-
-        // Versão do formato.
-        compressed.push_back(1);
-
-        // Quantidade de símbolos presentes na tabela.
-        Huffman::append_uint16(compressed, m_symbol_count);
-
-        // Tamanho original é necessário para eliminar o padding.
-        Huffman::append_uint64(
-            compressed,
-            static_cast<uint64_t>(data.size())
-        );
-
         if(data.empty()) {
-            return compressed;
-        }
 
-        /*
-         * Armazena a tabela de frequências no cabeçalho do arquivo.
-         */
-        for(uint16_t byte = 0; byte < 256; ++byte) {
+            std::vector<uint8_t> compressed;
 
-            if(!m_freq[byte]) {
-                continue;
-            }
+            compressed.reserve(HEADER_SIZE);
 
-            compressed.push_back(
-                static_cast<uint8_t>(byte)
+            compressed.push_back('H');
+            compressed.push_back('F');
+            compressed.push_back(FORMAT_VERSION);
+
+            append_uint16(
+                compressed,
+                0
             );
 
             append_uint64(
                 compressed,
-                m_freq[byte]
+                0
             );
+
+            return compressed;
         }
 
+        /**
+         * @brief Frequência de cada um dos 256 possíveis bytes.
+         *
+         * O índice representa o byte e o valor representa sua frequência.
+         * A frequência pode ser grande, por isso utilizamos uint64_t.
+         */
+        std::array<uint64_t, 256> histogram {};
+
+        /*
+         * Populamos o array de frequências de bytes
+         */
+        for(uint8_t byte : data) {
+            ++histogram[byte];
+        }
+
+        /*
+         * Constrói a árvore usando as frequências padrão.
+         * Dentro da função também conseguimos obter o valor de m_symbol_count
+         */
+        const uint16_t root = build_tree(histogram);
+
+        /*
+         * Caso especial em que existe somente um símbolo.
+         *
+         * Nesse caso, a árvore + tamanho original já são
+         * suficientes para reconstruir todos os dados.
+         */
+        if(is_leaf(m_nodes[root])) {
+
+            for(uint8_t byte : data) {
+
+                if(byte != m_nodes[root].byte) {
+                    return {};
+                }
+            }
+
+            const uint16_t tree_bit_count =
+                static_cast<uint16_t>(
+                    m_symbol_count * 10 - 1
+                );
+
+            const size_t tree_byte_count =
+                tree_bit_count / 8 +
+                (tree_bit_count % 8 != 0 ? 1 : 0);
+
+            std::vector<uint8_t> compressed;
+
+            compressed.reserve(
+                HEADER_SIZE + tree_byte_count
+            );
+
+            compressed.push_back('H');
+            compressed.push_back('F');
+            compressed.push_back(FORMAT_VERSION);
+
+            append_uint16(
+                compressed,
+                tree_bit_count
+            );
+
+            append_uint64(
+                compressed,
+                static_cast<uint64_t>(data.size())
+            );
+
+            size_t tree_bits_written = 0;
+
+            serialize_tree(
+                root,
+                compressed,
+                tree_bits_written
+            );
+
+            if(
+                tree_bits_written !=
+                tree_bit_count
+            ) {
+                return {};
+            }
+
+            return compressed;
+        }
+
+        /*
+         * Gera os códigos dos símbolos.
+         */
+        std::array<CodeInfo, 256> codes {};
+
+        std::array<uint8_t, 256> current_code {};
+
+        std::array<uint8_t, MAX_CODE_BYTES> code_bits {};
+
+        uint16_t code_bit_count = 0;
+
+        if(!generate_codes(
+            root,
+            current_code,
+            0,
+            codes,
+            code_bits,
+            code_bit_count
+        )) {
+            return {};
+        }
+
+        /*
+         * Calcula antecipadamente o tamanho exato
+         * do payload para realizar somente uma alocação.
+         */
+        size_t payload_bits = 0;
+
+        for(uint8_t byte : data) {
+
+            const CodeInfo code = codes[byte];
+            payload_bits += code.length;
+        }
+
+        const size_t payload_byte_count =
+            payload_bits / 8 +
+            (payload_bits % 8 != 0 ? 1 : 0);
+
+        const uint16_t tree_bit_count =
+            static_cast<uint16_t>(
+                m_symbol_count * 10 - 1
+            );
+
+        const size_t tree_byte_count =
+            tree_bit_count / 8 +
+            (tree_bit_count % 8 != 0 ? 1 : 0);
+
+        /*
+         * Agora que sabemos exatamente quanto será necessário,
+         * realizamos uma única reserva para o arquivo.
+         */
+        std::vector<uint8_t> compressed;
+
+        compressed.reserve(
+            HEADER_SIZE +
+            tree_byte_count +
+            payload_byte_count
+        );
+
+        /*
+         * Header.
+         */
+        compressed.push_back('H');
+        compressed.push_back('F');
+        compressed.push_back(FORMAT_VERSION);
+
+        append_uint16(
+            compressed,
+            tree_bit_count
+        );
+
+        append_uint64(
+            compressed,
+            static_cast<uint64_t>(data.size())
+        );
+
+        /*
+         * Serializa a árvore.
+         */
+        size_t tree_bits_written = 0;
+
+        serialize_tree(
+            root,
+            compressed,
+            tree_bits_written
+        );
+
+        if(
+            tree_bits_written !=
+            tree_bit_count
+        ) {
+            return {};
+        }
+
+        /*
+         * Empacota os códigos Huffman em bytes.
+         */
         uint8_t current_byte = 0;
         uint8_t bit_count = 0;
 
         for(uint8_t byte : data) {
 
-            const std::vector<bool>& code = codes[byte];
+            const CodeInfo code = codes[byte];
 
-            for(bool bit : code) {
+            for(uint16_t i = 0; i < code.length; ++i) {
 
-                /*
-                 * Os bits são armazenados do mais significativo
-                 * para o menos significativo:
-                 *
-                 * bit = 1
-                 * current_byte = current_byte << 1 | 1
-                 */
                 current_byte <<= 1;
 
-                if(bit) {
+                if(
+                    get_code_bit(
+                        code_bits,
+                        static_cast<uint16_t>(
+                            code.offset + i
+                        )
+                    )
+                ) {
                     current_byte |= 1;
                 }
 
                 ++bit_count;
 
-                /*
-                 * Um byte foi completamente preenchido.
-                 */
                 if(bit_count == 8) {
 
-                    compressed.push_back(current_byte);
+                    compressed.push_back(
+                        current_byte
+                    );
 
                     current_byte = 0;
                     bit_count = 0;
@@ -519,80 +984,80 @@ public:
         }
 
         /*
-         * Caso tenham sobrado bits que não completaram um byte,
-         * deslocamos para a esquerda para preencher os bits
-         * restantes com zeros.
+         * Preenche o último byte com zeros quando
+         * a quantidade de bits não for múltipla de 8.
          */
-        if(bit_count > 0) {
+        if(bit_count) {
 
-            current_byte <<= (8 - bit_count);
+            current_byte <<=
+                static_cast<uint8_t>(
+                    8 - bit_count
+                );
 
-            compressed.push_back(current_byte);
+            compressed.push_back(
+                current_byte
+            );
         }
 
         return compressed;
     }
 
     /**
-     * @brief Descomprime dados produzidos por apply().
+     * @brief Descomprime os dados produzidos por apply().
      *
-     * Lê o cabeçalho, reconstrói a mesma árvore de Huffman
-     * utilizada na compressão e percorre os bits comprimidos até
-     * recuperar a quantidade original de bytes.
+     * A função reconstrói a árvore armazenada no cabeçalho
+     * e utiliza o payload para recuperar os bytes originais.
      *
-     * @param data Dados comprimidos produzidos por apply().
+     * @param data Dados comprimidos.
      *
-     * @return Dados originais descomprimidos ou vetor vazio em caso
-     * de entrada inválida.
+     * @return Dados originais ou vetor vazio em caso de erro.
      */
     std::vector<uint8_t> deapply(
         const std::vector<uint8_t>& data
     ) override {
 
-        /*
-         * O cabeçalho mínimo contém:
-         *
-         * 2 bytes -> magic
-         * 1 byte  -> versão
-         * 2 bytes -> quantidade de símbolos
-         * 8 bytes -> tamanho original
-         */
-        if(data.size() < 13) {
+        if(data.size() < HEADER_SIZE) {
             return {};
         }
 
         size_t position = 0;
 
-        // Verifica o identificador do formato.
-        if(data[position++] != 'H' ||
-           data[position++] != 'F') {
+        /*
+         * Magic.
+         */
+        if(
+            data[position++] != 'H' ||
+            data[position++] != 'F'
+        ) {
             return {};
         }
 
-        // Verifica a versão do formato.
-        const uint8_t version = data[position++];
-
-        if(version != 1) {
+        /*
+         * Versão.
+         */
+        if(
+            data[position++] !=
+            FORMAT_VERSION
+        ) {
             return {};
         }
 
-        m_symbol_count = 0;
+        /*
+         * Quantidade de bits ocupada pela árvore.
+         */
+        uint16_t tree_bit_count = 0;
+
         if(!read_uint16(
             data,
             position,
-            m_symbol_count
+            tree_bit_count
         )) {
             return {};
         }
 
         /*
-         * Um arquivo não vazio precisa possuir pelo menos
-         * um símbolo na árvore. E também há um limite de 256 símbolos.
+         * Tamanho original.
          */
-        if(m_symbol_count == 0 || m_symbol_count > 256) {
-            return {};
-        }
-
         uint64_t original_size = 0;
 
         if(!read_uint64(
@@ -604,151 +1069,239 @@ public:
         }
 
         /*
-         * Arquivo original vazio.
+         * Arquivo vazio.
          */
         if(original_size == 0) {
+
+            if(
+                tree_bit_count != 0 ||
+                data.size() != HEADER_SIZE
+            ) {
+                return {};
+            }
+
             return {};
         }
 
-        // Limpamos toda a estrutura.
-        m_freq.fill(0);
-
         /*
-         * Reconstrói a tabela de frequências que originou a árvore.
+         * Arquivo não vazio precisa possuir uma árvore.
          */
-        for(uint16_t i = 0; i < m_symbol_count; ++i) {
-
-            if(position >= data.size()) {
-                return {};
-            }
-
-            const uint8_t byte = data[position++];
-
-            uint64_t frequency = 0;
-
-            if(!read_uint64(
-                data,
-                position,
-                frequency
-            )) {
-                return {};
-            }
-
-            /*
-             * Frequência zero não faz sentido no cabeçalho.
-             */
-            if(frequency == 0) {
-                return {};
-            }
-
-            m_freq[byte] = frequency;
+        if(tree_bit_count == 0) {
+            return {};
         }
 
         /*
-         * Reconstrói exatamente a árvore utilizada na compressão.
+         * Verifica se o tamanho solicitado cabe em size_t.
+         */
+        if(
+            original_size >
+            std::numeric_limits<size_t>::max()
+        ) {
+            return {};
+        }
+
+        /*
+         * Quantidade de bytes necessários para a árvore.
+         */
+        const size_t tree_byte_count =
+            tree_bit_count / 8 +
+            (tree_bit_count % 8 != 0 ? 1 : 0);
+
+        if(
+            (position + tree_byte_count) >
+            data.size()
+        ) {
+            return {};
+        }
+
+        /*
+         * A estrutura anterior da árvore deixa de ser válida.
+         */
+        m_node_count = 0;
+
+        std::array<bool, 256> seen_bytes {};
+
+        uint16_t leaf_count = 0;
+        uint16_t tree_bit_position = 0;
+
+        const size_t tree_start = position;
+
+        /*
+         * Reconstrói a árvore.
+         */
+        const uint16_t root = deserialize_tree(
+            data,
+            tree_start,
+            tree_bit_count,
+            tree_bit_position,
+            seen_bytes,
+            leaf_count
+        );
+
+        if(root == INVALID_NODE) {
+            return {};
+        }
+
+        /*
+         * A serialização precisa ter sido consumida
+         * exatamente até o último bit da árvore.
+         */
+        if(
+            tree_bit_position !=
+            tree_bit_count
+        ) {
+            return {};
+        }
+
+        if(leaf_count == 0) {
+            return {};
+        }
+
+        /*
+         * Uma árvore binária completa com L folhas possui
+         * exatamente 2L - 1 nós.
+         */
+        if(
+            m_node_count !=
+            static_cast<uint16_t>(
+                leaf_count * 2 - 1
+            )
+        ) {
+            return {};
+        }
+
+        /*
+         * Para L folhas, a nossa serialização possui:
          *
-         * O desempate determinístico do NodeComparer é importante
-         * para que a mesma tabela produza a mesma árvore.
+         * L folhas × 9 bits
+         * (L - 1) nós internos × 1 bit
+         *
+         * Total = 10L - 1 bits.
          */
-        m_root = build_tree();
+        const uint16_t expected_tree_bits =
+            static_cast<uint16_t>(
+                leaf_count * 10 - 1
+            );
 
-        if(m_root == -1) {
+        if(
+            tree_bit_count !=
+            expected_tree_bits
+        ) {
             return {};
         }
 
+        position += tree_byte_count;
+
+        const HuffmanNode& root_node =
+            m_nodes[root];
+
         /*
-         * Reserva aproximadamente o tamanho esperado da saída.
+         * Caso especial: apenas um símbolo.
+         *
+         * Não existe payload nesse caso.
          */
+        if(is_leaf(root_node)) {
+
+            if(position != data.size()) {
+                return {};
+            }
+
+            return std::vector<uint8_t>(
+                static_cast<size_t>(original_size),
+                root_node.byte
+            );
+        }
+
+        /*
+         * Uma árvore com múltiplos símbolos precisa
+         * possuir payload.
+         */
+        if(position >= data.size()) {
+            return {};
+        }
+
         std::vector<uint8_t> decompressed;
 
         decompressed.reserve(
             static_cast<size_t>(original_size)
         );
 
-        const HuffmanNode& root_node = m_nodes[m_root];
+        uint16_t current_node = root;
 
         /*
-         * Caso especial:
-         *
-         * Se existe somente um símbolo, seu código é "0".
-         * Portanto não precisamos sequer percorrer os bits.
+         * Percorre o payload bit a bit.
          */
-        if(
-            root_node.left  == -1 &&
-            root_node.right == -1
+        for(
+            size_t i = position;
+            i < data.size();
+            ++i
         ) {
 
-            for(uint64_t i = 0; i < original_size; ++i) {
-                decompressed.push_back(root_node.byte);
-            }
-
-            return decompressed;
-        }
-
-        /*
-         * Começamos na raiz e descemos pela árvore conforme
-         * os bits são lidos.
-         */
-        int current_node {m_root};
-
-        for(size_t i = position; i < data.size(); ++i) {
-
-            const uint8_t current_byte = data[i];
+            const uint8_t current_byte =
+                data[i];
 
             /*
-             * Os bits são lidos do mais significativo para
-             * o menos significativo, exatamente na ordem em
-             * que foram gravados por apply().
+             * Os bits são lidos do mais significativo
+             * para o menos significativo.
              */
             for(int bit = 7; bit >= 0; --bit) {
 
-                const bool value = (current_byte & (1u << bit)) != 0;
+                const bool value =
+                    (
+                        current_byte &
+                        (1u << bit)
+                    ) != 0;
 
-                current_node = value ? m_nodes[current_node].right
-                                     : m_nodes[current_node].left;
+                current_node = value
+                    ? m_nodes[current_node].right
+                    : m_nodes[current_node].left;
 
                 /*
-                 * Um caminho inválido indica dados corrompidos.
+                 * Caminho inválido indica corrupção.
                  */
-                if(current_node == -1) {
+                if(
+                    current_node ==
+                    INVALID_NODE
+                ) {
                     return {};
                 }
 
-                const HuffmanNode& node = m_nodes[current_node];
+                const HuffmanNode& node =
+                    m_nodes[current_node];
 
                 /*
-                 * Chegamos a uma folha:
-                 * um símbolo foi recuperado.
+                 * Chegamos a um símbolo.
                  */
-                if(
-                    node.left == -1 &&
-                    node.right == -1
-                ) {
+                if(is_leaf(node)) {
 
-                    decompressed.push_back(node.byte);
+                    decompressed.push_back(
+                        node.byte
+                    );
 
                     /*
-                     * Já recuperamos exatamente o tamanho original.
+                     * O tamanho original determina
+                     * exatamente quando devemos parar.
                      *
-                     * Os bits restantes do último byte são apenas
-                     * padding e devem ser ignorados.
+                     * Os bits restantes do último byte
+                     * são apenas padding.
                      */
                     if(
                         decompressed.size() ==
-                        static_cast<size_t>(original_size)
+                        static_cast<size_t>(
+                            original_size
+                        )
                     ) {
                         return decompressed;
                     }
 
-                    // Começamos o próximo símbolo novamente na raiz.
-                    current_node = m_root;
+                    current_node = root;
                 }
             }
         }
 
         /*
-         * Chegamos ao fim dos dados sem recuperar todos os bytes
-         * esperados. Isso indica que os dados estão incompletos.
+         * Terminamos o payload sem recuperar
+         * todos os bytes esperados.
          */
         return {};
     }
