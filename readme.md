@@ -9,11 +9,10 @@ O objetivo do repositório é servir como material de estudo e referência: cada
 ## Algoritmos implementados
 
 | # | Algoritmo | Status | Descrição |
-|:-:|-----------|:------:|-----------|
+|::|-----------|:------:|-----------|
 | 0 | **Codificação de Huffman** | ✅ Implementado | Constrói uma árvore binária a partir das frequências dos símbolos; os mais frequentes recebem códigos mais curtos. |
 | 1 | **Shannon-Fano-Elias** | 🚧 Em desenvolvimento | Codificação aritmética por intervalos cumulativos de probabilidade. |
-| 2 | **Lempel-Ziv (LZ77/LZ78)** | 🚧 Em desenvolvimento | Compressão baseada em dicionário e referências a ocorrências anteriores. |
-| 3 | **Lempel-Ziv-Welch (LZW)** | 🚧 Em desenvolvimento | Variante do LZ com dicionário construído dinamicamente durante a codificação. |
+| 2 | **Lempel-Ziv-Welch (LZW)** | 🚧 Em desenvolvimento | Variante do LZ com dicionário construído dinamicamente durante a codificação. |
 
 > Os números da coluna **#** correspondem ao valor passado pela opção `-n` na linha de comando.
 
@@ -61,7 +60,7 @@ make debug
 Isso gera um binário `Compressor` apropriado para utilização em `gdb`.
 
 ```bash
-make tese
+make teste
 ```
 
 Executa uma bateria de testes sobre os arquivos.
@@ -90,7 +89,6 @@ Executa uma bateria de testes sobre os arquivos.
 |:-------------:|-----------|
 | `0` | Codificação de Huffman |
 | `1` | Shannon-Fano-Elias |
-| `2` | Lempel-Ziv |
 | `3` | Lempel-Ziv-Welch |
 
 ---

@@ -4,5 +4,6 @@
 #include "./File.hpp"
 #include "./CompressionAlgorithm.hpp"
 #include "./LossLessCompression/Huffman.hpp"
+#include "./LossLessCompression/Shannon.hpp"
 
 

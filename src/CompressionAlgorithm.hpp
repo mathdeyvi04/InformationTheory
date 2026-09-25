@@ -8,6 +8,8 @@
 #include <functional>
 #include <limits>
 #include <utility>
+#include <set>
+#include <cmath>
 
 class CompressionAlgorithm {
 public:

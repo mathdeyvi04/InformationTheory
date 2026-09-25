@@ -2,7 +2,7 @@ all:
 	@g++ -std=c++20 ./main.cpp -o ./src/Compressor
 
 teste:
-	@./src/Compressor -i ./inputfile.txt -m 2
+	@./src/Compressor -i ./inputfile.txt -m 2 -n 1
 	@echo
 	@echo "═══════════════════════════════════════"
 	@echo "           Dump hexadecimal"

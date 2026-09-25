@@ -84,7 +84,7 @@ private:
      *
      * @return Índice da raiz ou INVALID_NODE caso não existam símbolos.
      */
-    uint16_t build_tree(const std::array<uint64_t, 256>& histogram) {
+    uint16_t build_tree(const std::array<uint64_t, MAX_POSSIBLE_BYTES>& histogram, const std::set<uint8_t>& byte_set) {
 
         m_node_count = 0;
 
@@ -102,18 +102,12 @@ private:
             std::greater<>
         > queue;
 
-        for(uint16_t byte = 0; byte < 256; ++byte) {
-
-            // Não vamos inserir bytes com frequência 0
-            if(!histogram[byte]) {
-                continue;
-            }
+        for(const auto& byte : byte_set) {
 
             if(m_node_count >= MAX_TREE_NODES) {
                 return INVALID_NODE;
             }
 
-            ++m_symbol_count;
             const uint16_t index = m_node_count++;
 
             m_nodes[index] = {
@@ -237,9 +231,9 @@ private:
      */
     bool generate_codes(
         uint16_t node,
-        std::array<uint8_t, 256>& current_code,
+        std::array<uint8_t, MAX_POSSIBLE_BYTES>& current_code,
         uint16_t current_length,
-        std::array<CodeInfo, 256>& codes,
+        std::array<CodeInfo, MAX_POSSIBLE_BYTES>& codes,
         std::array<uint8_t, MAX_CODE_BYTES>& code_bits,
         uint16_t& code_bit_count
     ) const {
@@ -603,7 +597,7 @@ private:
         size_t tree_start,
         uint16_t tree_bit_count,
         uint16_t& bit_position,
-        std::array<bool, 256>& seen_bytes,
+        std::array<bool, MAX_POSSIBLE_BYTES>& seen_bytes,
         uint16_t& leaf_count
     ) {
 
@@ -653,7 +647,7 @@ private:
                 return INVALID_NODE;
             }
 
-            if(leaf_count >= 256) {
+            if(leaf_count >= MAX_POSSIBLE_BYTES) {
                 return INVALID_NODE;
             }
 
@@ -773,20 +767,27 @@ public:
          * O índice representa o byte e o valor representa sua frequência.
          * A frequência pode ser grande, por isso utilizamos uint64_t.
          */
-        std::array<uint64_t, 256> histogram {};
+        std::array<uint64_t, MAX_POSSIBLE_BYTES> histogram {};
+
+        /**
+         * @brief Conjunto de Bytes utilizados
+         */
+        std::set<uint8_t> byte_set {};
 
         /*
          * Populamos o array de frequências de bytes
          */
         for(uint8_t byte : data) {
             ++histogram[byte];
+            byte_set.insert(byte);
         }
+        m_symbol_count = byte_set.size();
 
         /*
          * Constrói a árvore usando as frequências padrão.
          * Dentro da função também conseguimos obter o valor de m_symbol_count
          */
-        const uint16_t root = build_tree(histogram);
+        const uint16_t root = build_tree(histogram, byte_set);
 
         /*
          * Caso especial em que existe somente um símbolo.
@@ -853,9 +854,9 @@ public:
         /*
          * Gera os códigos dos símbolos.
          */
-        std::array<CodeInfo, 256> codes {};
+        std::array<CodeInfo, MAX_POSSIBLE_BYTES> codes {};
 
-        std::array<uint8_t, 256> current_code {};
+        std::array<uint8_t, MAX_POSSIBLE_BYTES> current_code {};
 
         std::array<uint8_t, MAX_CODE_BYTES> code_bits {};
 
@@ -878,7 +879,7 @@ public:
          */
         size_t payload_bits = 0;
 
-        for(uint8_t byte : data) {
+        for(const auto& byte : byte_set) {
 
             const CodeInfo code = codes[byte];
             payload_bits += code.length;
@@ -1119,7 +1120,7 @@ public:
          */
         m_node_count = 0;
 
-        std::array<bool, 256> seen_bytes {};
+        std::array<bool, MAX_POSSIBLE_BYTES> seen_bytes {};
 
         uint16_t leaf_count = 0;
         uint16_t tree_bit_position = 0;
