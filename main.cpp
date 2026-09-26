@@ -1,14 +1,11 @@
 #include "./src/all_includes.hpp"
-#include <string>
-#include <iostream>
-#include <memory>
-#include <functional>
 
 // Criamos um vetor com todas as possibilidades de algoritmos
 using Factory = std::function<std::unique_ptr<CompressionAlgorithm>()>;
 const std::vector<Factory> industries {
     [] { return std::make_unique<Huffman>(); }, // 0
     [] { return std::make_unique<Shannon>(); }, // 1
+    [] { return std::make_unique<LZW>();     }, // 2
 };
 
 std::unique_ptr<CompressionAlgorithm> get_algorithm(int id) {

@@ -2,7 +2,7 @@ all:
 	@g++ -std=c++20 ./main.cpp -o ./src/Compressor
 
 teste:
-	@./src/Compressor -i ./inputfile.txt -m 2 -n 1
+	@./src/Compressor -i ./inputfile.txt -m 2 -n 2
 	@echo
 	@echo "═══════════════════════════════════════"
 	@echo "           Dump hexadecimal"
@@ -22,7 +22,6 @@ teste:
 	@echo "════════════════════════════════════════"
 	@diff ./inputfile.txt ./probably_inputfile.txt && echo "\tOK: arquivos idênticos" \
 	 || echo "\tERRO: arquivos diferem"
-	@diff ./inputfile.txt ./probably_inputfile.txt
 
 clean:
 	@rm -rf ./a.out ./probably_inputfile.txt ./src/Compressor
