@@ -1,0 +1,77 @@
+         * Se já recuperamos tudo, o arquivo deve terminar
+         * exatamente neste ponto.
+         */
+        if (output.size() == original_size) {
+            if (!reader.empty()) {
+                return {};
+            }
+
+            return output;
+        }
+
+        while (output.size() < original_size) {
+            uint16_t current_code {0};
+
+            /*
+             * O decoder está uma entrada atrás do compressor.
+             * Por isso a largura do código é calculada com
+             * next_code + 1.
+             */
+            if (
+                !reader.read(
+                    get_decode_code_width(next_code),
+                    current_code
+                )
+            ) {
+                return {};
+            }
+
+            /*
+             * Códigos maiores que next_code são inválidos.
+             *
+             * current_code == next_code é o caso especial
+             * conhecido como KwKwK.
+             */
+            if (
+                current_code > next_code ||
+                (
+                    current_code == next_code &&
+                    next_code >= MAX_DICTIONARY_SIZE
+                )
+            ) {
+                return {};
+            }
+
+            size_t sequence_length {0};
+            uint8_t first_byte {0};
+
+            if (current_code == next_code) {
+                /*
+                 * Caso especial:
+                 *
+                 * sequência atual =
+                 * sequência anterior + primeiro byte da
+                 * sequência anterior.
+                 *
+                 * expand_code() armazena a sequência invertida.
+                 * Portanto, o primeiro byte deve ser inserido
+                 * no início do stack.
+                 */
+                if (
+                    !expand_code(
+                        previous_code,
+                        next_code,
+                        prefix,
+                        suffix,
+                        stack,
+                        sequence_length,
+                        first_byte
+                    )
+                ) {
+                    return {};
+                }
+
+                if (sequence_length >= stack.size()) {
+                    return {};
+                }
+

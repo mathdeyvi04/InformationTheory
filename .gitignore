@@ -1,0 +1,10 @@
+.idea/
+venv/
+trash/
+__pycache__/
+
+Compressor
+a.out
+Próximas atualizações.txt
+TestesASeremConstruídos.md
+probably_inputfile.txt

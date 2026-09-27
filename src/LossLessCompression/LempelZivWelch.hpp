@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../CompressionAlgorithm.hpp"
+#include "../core/CompressionAlgorithm.hpp"
 
 class LZW : public CompressionAlgorithm {
 private:
@@ -28,25 +28,82 @@ private:
     };
 
     /*
-     * 8192 posições para no máximo 3840 entradas dinâmicas.
-     * Mantemos uma ocupação baixa para reduzir colisões.
+     * A chave possui:
+     *
+     * 12 bits -> prefix_code
+     * 8 bits  -> next_byte
+     *
+     * Total = 20 bits.
      */
-    /// Quantidade de posições da tabela hash utilizada pelo compressor.
-    static constexpr size_t HASH_TABLE_SIZE {8192};
+    /// Quantidade de bits utilizada pela chave da tabela hash.
+    static constexpr uint8_t HASH_KEY_BITS {20};
 
-    /// Máscara utilizada para calcular índices da tabela hash.
-    static constexpr size_t HASH_MASK {HASH_TABLE_SIZE - 1};
+    /// Máscara dos 20 bits inferiores utilizados pela chave.
+    static constexpr uint32_t HASH_KEY_MASK {
+        (1U << HASH_KEY_BITS) - 1U
+    };
+
+    /*
+     * A tabela utiliza:
+     *
+     * 20 bits -> chave
+     * 12 bits -> código dinâmico
+     *
+     * Total = 32 bits.
+     */
+    /// Maior tamanho possível da tabela hash.
+    static constexpr size_t MAX_HASH_TABLE_SIZE {8192};
 
     /**
      * Tabela usada para encontrar:
      *
      * (prefix_code + next_byte) -> dictionary_code
+     *
+     * A tabela é dimensionada uma única vez para cada execução.
      */
     struct Dictionary {
-        std::array<uint32_t, HASH_TABLE_SIZE> keys {};
-        std::array<uint16_t, HASH_TABLE_SIZE> values {};
+        /*
+         * Cada posição armazena:
+         *
+         * bits  0..19 -> chave
+         * bits 20..31 -> código do dicionário
+         *
+         * Valor 0 = posição vazia.
+         *
+         * Isso é seguro porque os códigos armazenados começam
+         * em FIRST_DYNAMIC_CODE (256), portanto nunca podem
+         * produzir um valor 0.
+         */
+        std::vector<uint32_t> entries;
+
+        /// Máscara utilizada para calcular índices da tabela.
+        size_t hash_mask {0};
 
         uint16_t next_code {FIRST_DYNAMIC_CODE};
+
+        /**
+         * Cria uma tabela com aproximadamente 50% de ocupação máxima.
+         */
+        explicit Dictionary(
+            const size_t maximum_entries
+        ) {
+            const size_t target_size {
+                maximum_entries * 2U
+            };
+
+            size_t table_size {1};
+
+            while (
+                table_size < target_size &&
+                table_size < MAX_HASH_TABLE_SIZE
+            ) {
+                table_size <<= 1U;
+            }
+
+            entries.resize(table_size);
+
+            hash_mask = table_size - 1U;
+        }
 
         /**
          * Constrói uma chave única a partir do código anterior
@@ -64,14 +121,17 @@ private:
         /**
          * Hash rápido para a tabela.
          */
-        static size_t hash_key(const uint32_t key) {
+        static size_t hash_key(
+            const uint32_t key,
+            const size_t mask
+        ) {
             uint32_t hash {key};
 
             hash ^= hash >> 16U;
             hash *= 0x7FEB352DU;
             hash ^= hash >> 15U;
 
-            return static_cast<size_t>(hash) & HASH_MASK;
+            return static_cast<size_t>(hash) & mask;
         }
 
         /**
@@ -83,18 +143,30 @@ private:
             uint16_t& code
         ) const {
             const uint32_t key {
-                make_key(prefix_code, next_byte) + 1U
+                make_key(prefix_code, next_byte)
             };
 
-            size_t index {hash_key(key)};
+            size_t index {
+                hash_key(key, hash_mask)
+            };
 
-            while (keys[index] != 0U) {
-                if (keys[index] == key) {
-                    code = values[index];
+            while (entries[index] != 0U) {
+                const uint32_t entry {
+                    entries[index]
+                };
+
+                if (
+                    (entry & HASH_KEY_MASK) ==
+                    key
+                ) {
+                    code = static_cast<uint16_t>(
+                        entry >> HASH_KEY_BITS
+                    );
+
                     return true;
                 }
 
-                index = (index + 1U) & HASH_MASK;
+                index = (index + 1U) & hash_mask;
             }
 
             return false;
@@ -112,17 +184,20 @@ private:
             }
 
             const uint32_t key {
-                make_key(prefix_code, next_byte) + 1U
+                make_key(prefix_code, next_byte)
             };
 
-            size_t index {hash_key(key)};
+            size_t index {
+                hash_key(key, hash_mask)
+            };
 
-            while (keys[index] != 0U) {
-                index = (index + 1U) & HASH_MASK;
+            while (entries[index] != 0U) {
+                index = (index + 1U) & hash_mask;
             }
 
-            keys[index] = key;
-            values[index] = next_code;
+            entries[index] =
+                (static_cast<uint32_t>(next_code) << HASH_KEY_BITS) |
+                key;
 
             ++next_code;
         }
@@ -460,7 +535,35 @@ public:
             return writer.finish();
         }
 
-        Dictionary dictionary;
+        /*
+         * O compressor pode criar no máximo:
+         *
+         * data.size() - 1
+         *
+         * entradas, pois o primeiro byte não gera uma inserção.
+         *
+         * O dicionário dinâmico possui no máximo:
+         *
+         * 4096 - 256 = 3840
+         *
+         * entradas.
+         */
+        const size_t maximum_dynamic_entries {
+            std::min(
+                data.size() - 1U,
+                static_cast<size_t>(
+                    MAX_DICTIONARY_SIZE -
+                    FIRST_DYNAMIC_CODE
+                )
+            )
+        };
+
+        /*
+         * A tabela é dimensionada uma única vez para esta execução.
+         */
+        Dictionary dictionary {
+            maximum_dynamic_entries
+        };
 
         /*
          * w representa a sequência atual.

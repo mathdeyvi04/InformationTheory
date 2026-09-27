@@ -1,4 +1,4 @@
-#include "./src/all_includes.hpp"
+#include "./util/all_includes.hpp"
 
 // Criamos um vetor com todas as possibilidades de algoritmos
 using Factory = std::function<std::unique_ptr<CompressionAlgorithm>()>;

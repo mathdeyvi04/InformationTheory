@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../CompressionAlgorithm.hpp"
+#include "../core/CompressionAlgorithm.hpp"
 
 class Huffman : public CompressionAlgorithm {
 private:
