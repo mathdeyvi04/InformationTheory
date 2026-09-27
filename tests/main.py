@@ -1,10 +1,12 @@
 from tests.Compressibility.Compressibility import Compressibility
+from tests.MaxCompressibility.MaxCompressibility import MaxCompressibility
 import argparse
 
 class TestManager:
 
     POSSIBLES_TESTS = [
-        Compressibility
+        Compressibility,
+        MaxCompressibility
     ]
 
     def __init__(self, test_number: int = 0):

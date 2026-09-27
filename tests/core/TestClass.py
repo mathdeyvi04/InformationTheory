@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from pathlib import Path, PosixPath
 from subprocess import run
+from shutil import rmtree
 from csv import writer, DictReader
 
 class TestClass(ABC):
@@ -15,6 +16,7 @@ class TestClass(ABC):
         self.test_dir = Path(__file__).resolve().parent.parent
         self.list_path_to_test_files = self.get_test_files()
         self._path_to_executable = str(self.test_dir.parent / "bin/Compressor")
+        self.trash_dir = self.test_dir / "trash"
 
     @staticmethod
     def get_size(path: PosixPath | Path) -> int:
@@ -23,6 +25,11 @@ class TestClass(ABC):
     @staticmethod
     def delete(path: PosixPath | Path):
         path.unlink(missing_ok=True)
+
+    @staticmethod
+    def clear_dir(path:PosixPath | Path):
+        rmtree(path, ignore_errors=True)
+        path.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def dump_results(exit_path: Path, results: list):

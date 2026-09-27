@@ -3,17 +3,23 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 class Compressibility(TestClass):
+    """
+    O teste Compressibility avalia a taxa de compressão dos algoritmos implementados
+    sobre um conjunto de arquivos de referência.
+    Após cada execução, o arquivo temporário é descartado para não poluir o ambiente.
+    Ao final, os resultados são consolidados em um arquivo CSV (results.csv), servindo
+    de entrada para a posterior geração de gráficos comparativos (results.png).
+    """
 
     def __init__(self):
         super().__init__()
         self.my_path = self.test_dir / "Compressibility"
-        self.trash_dir = self.test_dir / "trash"
         self.exit_file = self.my_path / "results.csv"
         self.exit_img = self.my_path / "results.png"
 
     def do_test(self):
 
-        results = [["Nome", "Tamanho Original", *TestClass.ALGORITHM_NAMES]]
+        results: list[list[str | float]] = [["Nome", "Tamanho Original", *TestClass.ALGORITHM_NAMES]]
         for file in self.list_path_to_test_files:
             results.append([])
             # Salvamos a informação do nome
@@ -22,7 +28,7 @@ class Compressibility(TestClass):
             # Salvamos a informação do tamanho original
             results[-1].append(self.get_size(file))
 
-            for algorithm_number in {0, 1, 2}:
+            for algorithm_number in range(0, len(TestClass.ALGORITHM_NAMES)):
                 path_to_output = self.trash_dir / f"{file.name}{algorithm_number}.out"
 
                 self.execute(
@@ -35,8 +41,8 @@ class Compressibility(TestClass):
                 # Salvamos a informação da razão de compressão
                 results[-1].append(self.get_size(path_to_output) / results[-1][1])
 
-                # Para não poluirmos o ambiente, vamos jogar no lixo
-                self.delete(path_to_output)
+        # Para não poluirmos o ambiente, vamos jogar no lixo
+        self.clear_dir(self.trash_dir)
 
         # Salvamos as informações obtidas
         self.dump_results(self.exit_file, results)
@@ -99,7 +105,7 @@ class Compressibility(TestClass):
                 x + offset,
                 valores,
                 largura,
-                label=alg.capitalize(),
+                label=alg,
                 color=cores[alg],
                 edgecolor="black",
                 linewidth=0.5,
