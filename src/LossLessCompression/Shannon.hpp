@@ -360,6 +360,25 @@ private:
         }
     }
 
+    /*
+     * A trie possui no máximo:
+     *
+     *   1 nó raiz +
+     *   soma dos comprimentos dos códigos
+     *
+     * Como existem no máximo 256 símbolos e cada código possui
+     * no máximo 65 bits, o índice de nó cabe em uint16_t.
+     */
+    struct TrieNode {
+        std::array<uint16_t, 2> child {
+            std::numeric_limits<uint16_t>::max(),
+            std::numeric_limits<uint16_t>::max()
+        };
+
+        uint8_t symbol {0};
+        uint8_t terminal {0};
+    };
+
 public:
 
     /**
@@ -667,11 +686,13 @@ public:
          */
         std::array<Code, MAX_POSSIBLE_BYTES> codes {};
 
+        size_t total_code_bits {0};
+
         for(uint16_t symbol = 0;
             symbol < symbol_count;
             ++symbol) {
 
-            if(offset + 2U > data.size()) {
+            if(data.size() - offset < 2U) {
                 return {};
             }
 
@@ -704,7 +725,7 @@ public:
                 (static_cast<size_t>(code_length) + 7U) / 8U
             };
 
-            if(offset + code_byte_count > data.size()) {
+            if(data.size() - offset < code_byte_count) {
                 return {};
             }
 
@@ -717,6 +738,18 @@ public:
                 codes[byte].bytes[code_byte] =
                     data[offset++];
             }
+
+            /*
+             * Cada bit de um código pode representar, no pior caso,
+             * um novo nó da trie.
+             */
+            if(total_code_bits >
+               std::numeric_limits<size_t>::max() -
+                   static_cast<size_t>(code_length)) {
+                return {};
+            }
+
+            total_code_bits += static_cast<size_t>(code_length);
         }
 
         /*
@@ -725,6 +758,105 @@ public:
          */
         if(offset >= data.size()) {
             return {};
+        }
+
+        /* -------------------------- Árvore de códigos ------------------------ */
+
+        const uint16_t NO_NODE {
+            std::numeric_limits<uint16_t>::max()
+        };
+
+        std::vector<TrieNode> trie {};
+
+        if(total_code_bits >
+           std::numeric_limits<size_t>::max() - 1U) {
+            return {};
+        }
+
+        trie.reserve(1U + total_code_bits);
+        trie.emplace_back();
+
+        /*
+         * Constrói a trie a partir dos códigos serializados.
+         *
+         * Além de acelerar a decodificação, esta etapa garante que a
+         * tabela realmente representa códigos prefix-free:
+         *
+         *   - um código não pode ser prefixo de outro;
+         *   - dois códigos não podem ser iguais.
+         */
+        for(size_t byte = 0;
+            byte < MAX_POSSIBLE_BYTES;
+            ++byte) {
+
+            const Code& code {
+                codes[byte]
+            };
+
+            if(code.length == 0) {
+                continue;
+            }
+
+            uint16_t node_index {0};
+
+            for(uint8_t bit_index = 0;
+                bit_index < code.length;
+                ++bit_index) {
+
+                /*
+                 * Se o nó atual já for terminal, existe um código
+                 * anterior que é prefixo do código atual.
+                 */
+                if(trie[node_index].terminal != 0) {
+                    return {};
+                }
+
+                const uint8_t bit {
+                    get_code_bit(code, bit_index)
+                };
+
+                uint16_t next_node {
+                    trie[node_index].child[bit]
+                };
+
+                if(next_node == NO_NODE) {
+
+                    if(trie.size() >=
+                       static_cast<size_t>(NO_NODE)) {
+                        return {};
+                    }
+
+                    next_node =
+                        static_cast<uint16_t>(trie.size());
+
+                    trie[node_index].child[bit] = next_node;
+
+                    trie.emplace_back();
+                }
+
+                node_index = next_node;
+            }
+
+            /*
+             * Se já é terminal, o código atual é duplicado.
+             */
+            if(trie[node_index].terminal != 0) {
+                return {};
+            }
+
+            /*
+             * Se já possui filhos, o código atual é prefixo de
+             * outro código existente.
+             */
+            if(trie[node_index].child[0] != NO_NODE ||
+               trie[node_index].child[1] != NO_NODE) {
+                return {};
+            }
+
+            trie[node_index].symbol =
+                static_cast<uint8_t>(byte);
+
+            trie[node_index].terminal = 1;
         }
 
         /* ------------------------------- Output ------------------------------- */
@@ -738,14 +870,16 @@ public:
         /* -------------------------- Decodificação ---------------------------- */
 
         /*
-         * Acumulamos os bits recebidos até que coincidam com um
-         * código completo da tabela.
+         * A decodificação agora percorre diretamente a trie.
          *
-         * Como o Shannon-Elias gera um código prefix-free,
-         * ao encontrar uma correspondência o símbolo pode ser
-         * emitido imediatamente.
+         * Cada bit realiza apenas:
+         *
+         *   nó atual -> filho 0/1
+         *
+         * Ao atingir um nó terminal, o símbolo é emitido e
+         * a busca retorna à raiz.
          */
-        Code current_code {};
+        uint16_t node_index {0};
 
         for(size_t payload_byte = offset;
             payload_byte < data.size() &&
@@ -769,96 +903,47 @@ public:
                     )
                 };
 
+                const uint16_t next_node {
+                    trie[node_index].child[bit]
+                };
+
                 /*
-                 * Não devemos ultrapassar o tamanho máximo suportado
-                 * por Code.
+                 * O caminho atual não pertence a nenhum código válido.
                  */
-                if(current_code.length >= MAX_CODE_BITS) {
+                if(next_node == NO_NODE) {
                     return {};
                 }
 
-                append_code_bit(
-                    current_code,
-                    bit
-                );
+                node_index = next_node;
 
                 /*
-                 * Procuramos qual símbolo possui exatamente o
-                 * código acumulado.
+                 * Encontramos um código completo.
                  */
-                bool symbol_found {false};
+                if(trie[node_index].terminal != 0) {
 
-                for(size_t byte = 0;
-                    byte < MAX_POSSIBLE_BYTES;
-                    ++byte) {
-
-                    const Code& code {
-                        codes[byte]
-                    };
-
-                    if(code.length == 0 ||
-                       code.length != current_code.length) {
-                        continue;
-                    }
-
-                    bool matches {true};
-
-                    for(uint8_t code_bit = 0;
-                        code_bit < current_code.length;
-                        ++code_bit) {
-
-                        if(get_code_bit(
-                            code,
-                            code_bit
-                        ) != get_code_bit(
-                            current_code,
-                            code_bit
-                        )) {
-                            matches = false;
-                            break;
-                        }
-                    }
-
-                    if(!matches) {
-                        continue;
-                    }
-
-                    /*
-                     * Encontramos o símbolo correspondente ao código.
-                     */
                     decompressed.push_back(
-                        static_cast<uint8_t>(byte)
+                        trie[node_index].symbol
                     );
 
-                    current_code = Code {};
-                    symbol_found = true;
-
-                    break;
-                }
-
-                /*
-                 * Não encontrar um símbolo ainda não é erro:
-                 * o código acumulado pode ser apenas um prefixo.
-                 */
-                if(symbol_found) {
-                    continue;
+                    node_index = 0;
                 }
             }
         }
 
         /*
-         * O tamanho original é a informação que determina exatamente
-         * quantos símbolos precisam ser recuperados.
-         *
-         * Se sobraram bits em current_code, significa que o payload
-         * terminou no meio de um código.
+         * O tamanho original determina exatamente quantos símbolos
+         * precisam ser reconstruídos.
          */
         if(decompressed.size() !=
            static_cast<size_t>(original_size)) {
             return {};
         }
 
-        if(current_code.length != 0) {
+        /*
+         * Se ainda estivermos fora da raiz, o payload terminou no
+         * meio de um código.
+         */
+        if(node_index != 0) {
             return {};
         }
 

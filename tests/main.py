@@ -17,7 +17,7 @@ class TestManager:
             return
 
         TestToRealize = TestManager.POSSIBLES_TESTS[test_number]()
-        # TestToRealize.do_test()
+        TestToRealize.do_test()
         TestToRealize.show_results()
 
 if __name__ == '__main__':
