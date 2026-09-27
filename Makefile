@@ -35,7 +35,7 @@ deep_test:
 straight_test:
 	@mkdir -p $(BUILD_DIR)
 	@echo "════════════════════════════════════════"
-	@echo "             Compressão"
+	@echo "  Tempo de Compressão e Descompressão"
 	@echo "════════════════════════════════════════"
 	@$(BIN) -i $(INPUT) -o $(COMPRESSED) -m 2 -n $(N)
 	@mv probably_inputfile.txt $(DECOMPRESSED)

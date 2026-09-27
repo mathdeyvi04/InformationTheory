@@ -62,14 +62,27 @@ int main(int argc, char* argv[]) {
     std::unique_ptr<CompressionAlgorithm> algorithm {get_algorithm(idx)};
 
     if(mode == 2) {
-        std::vector<uint8_t> data = algorithm->apply(read_from_input);
-        File outputfile {outputfilename, false};
-        outputfile.write(data);
+        const auto start_compress = std::chrono::steady_clock::now();
+        std::vector<uint8_t> data_from_compress = algorithm->apply(read_from_input);
+        const auto end_compress   = std::chrono::steady_clock::now();
 
-        // Há garantia que a decompactação funcionará
+        File outputfile {outputfilename, false};
+        outputfile.write(data_from_compress);
+
+        // Há garantia que a descompactação funcionará
+        const auto start_decompress = std::chrono::steady_clock::now();
+        std::vector<uint8_t> data_from_decompress = algorithm->deapply(data_from_compress);
+        const auto end_decompress   = std::chrono::steady_clock::now();
+
         File probably_inputfile {"probably_inputfile.txt", false};
-        data = algorithm->deapply(data);
-        probably_inputfile.write(data);
+        probably_inputfile.write(data_from_decompress);
+
+        const std::chrono::duration<double, std::milli> elapsed_compress = end_compress - start_compress;
+        const std::chrono::duration<double, std::milli> elapsed_decompress = end_decompress - start_decompress;
+        std::cout << elapsed_compress
+                  << " - "
+                  << elapsed_decompress
+                  << std::endl;
         return 0;
     }
 

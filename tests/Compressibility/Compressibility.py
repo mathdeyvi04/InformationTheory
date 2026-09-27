@@ -48,6 +48,7 @@ class Compressibility(TestClass):
         self.dump_results(self.exit_file, results)
 
     def show_results(self):
+        plt.style.use("dark_background")
 
         cabecalho, linhas = self.load_results(self.exit_file)
         # As duas primeiras colunas são metadados; o resto são algoritmos

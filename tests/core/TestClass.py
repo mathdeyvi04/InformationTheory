@@ -56,9 +56,10 @@ class TestClass(ABC):
             input_file: Path | PosixPath | str,
             output_file: Path | PosixPath | str,
             algorithm: int,
-            mode: int
-    ) -> None:
-        run(
+            mode: int,
+            get_stdout: bool = False
+    ):
+        return run(
             [
                 self._path_to_executable,
                 "-i", str(input_file),
@@ -66,6 +67,8 @@ class TestClass(ABC):
                 "-n", str(algorithm),
                 "-m", str(mode)
             ],
+            capture_output=get_stdout,
+            text=get_stdout,
             check=True
         )
 

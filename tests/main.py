@@ -1,12 +1,14 @@
 from tests.Compressibility.Compressibility import Compressibility
 from tests.MaxCompressibility.MaxCompressibility import MaxCompressibility
+from tests.TimeDuration.TimeDuration import TimeDuration
 import argparse
 
 class TestManager:
 
     POSSIBLES_TESTS = [
         Compressibility,
-        MaxCompressibility
+        MaxCompressibility,
+        TimeDuration
     ]
 
     def __init__(self, test_number: int = 0):
@@ -15,7 +17,7 @@ class TestManager:
             return
 
         TestToRealize = TestManager.POSSIBLES_TESTS[test_number]()
-        TestToRealize.do_test()
+        # TestToRealize.do_test()
         TestToRealize.show_results()
 
 if __name__ == '__main__':
