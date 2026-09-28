@@ -53,23 +53,27 @@ class TestClass(ABC):
 
     def execute(
             self,
-            input_file: Path | PosixPath | str,
-            output_file: Path | PosixPath | str,
+            input_file: Path | PosixPath,
+            output_file: Path | PosixPath,
             algorithm: int,
             mode: int,
-            get_stdout: bool = False
+            get_stdout: bool = False,
+            prefix: list[str] | None = None,
     ):
+        command = [
+            *(prefix or []),
+            self._path_to_executable,
+            "-i", str(input_file),
+            "-o", str(output_file),
+            "-n", str(algorithm),
+            "-m", str(mode),
+        ]
+
         return run(
-            [
-                self._path_to_executable,
-                "-i", str(input_file),
-                "-o", str(output_file),
-                "-n", str(algorithm),
-                "-m", str(mode)
-            ],
+            command,
             capture_output=get_stdout,
             text=get_stdout,
-            check=True
+            check=True,
         )
 
     @abstractmethod

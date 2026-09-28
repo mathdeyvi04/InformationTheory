@@ -1,6 +1,7 @@
 from tests.Compressibility.Compressibility import Compressibility
 from tests.MaxCompressibility.MaxCompressibility import MaxCompressibility
 from tests.TimeDuration.TimeDuration import TimeDuration
+from tests.MemoryUsage.MemoryUsage import MemoryUsage
 import argparse
 
 class TestManager:
@@ -8,7 +9,8 @@ class TestManager:
     POSSIBLES_TESTS = [
         Compressibility,
         MaxCompressibility,
-        TimeDuration
+        TimeDuration,
+        MemoryUsage
     ]
 
     def __init__(self, test_number: int = 0):

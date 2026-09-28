@@ -1,6 +1,6 @@
 CXX          := g++
 CXXFLAGS     := -std=c++20
-DEBUGFLAGS   := -g3 -Wall -fno-inline -fno-inline-small-functions
+DEBUGFLAGS   := -g3 -Wall -fno-inline
 PYTHON       := python3
 PYTHONFLAGS  := -m
 
