@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from matplotlib import pyplot as plt
 from pathlib import Path, PosixPath
 from subprocess import run
 from shutil import rmtree
@@ -50,6 +51,35 @@ class TestClass(ABC):
     def get_test_files(self) -> list[Path]:
         test_files_dir = self.test_dir / "test_files"
         return [f for f in test_files_dir.iterdir() if f.is_file()]
+
+    @staticmethod
+    def apply_font():
+        plt.rcParams.update({
+            # Fonte serifada para o texto
+            "font.family": "serif",
+            "font.serif": ["DejaVu Serif"],
+
+            # Símbolos matemáticos no estilo Computer Modern
+            "mathtext.fontset": "cm",
+
+            # Tamanhos consistentes
+            "font.size": 11,
+            "axes.titlesize": 16,
+            "axes.labelsize": 14,
+            "xtick.labelsize": 13,
+            "ytick.labelsize": 13,
+            "legend.fontsize": 11,
+
+            # Ticks voltados para dentro (convenção científica)
+            "xtick.direction": "in",
+            "ytick.direction": "in",
+            "xtick.top": True,
+            "ytick.right": True,
+
+            # Grade mais discreta
+            "grid.alpha": 0.3,
+            "grid.linestyle": "--",
+        })
 
     def execute(
             self,

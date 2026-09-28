@@ -122,6 +122,7 @@ class MemoryUsage(TestClass):
 
         Cada subplot exibe duas curvas: heap e stack.
         """
+        self.apply_font()
         results_dir = self.my_path / "results"
         algorithms = self.ALGORITHM_NAMES
 

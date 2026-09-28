@@ -62,6 +62,8 @@ class MaxCompressibility(TestClass):
         self.dump_results(self.exit_file, results)
 
     def show_results(self):
+        self.apply_font()
+
         cabecalho, rows = self.load_results(self.exit_file)
 
         algorithms = TestClass.ALGORITHM_NAMES

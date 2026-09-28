@@ -59,6 +59,7 @@ class TimeDuration(TestClass):
         self.dump_results(self.exit_file, results)
 
     def show_results(self):
+        self.apply_font()
         plt.style.use("dark_background")
         cabecalho, rows = self.load_results(self.exit_file)
 
