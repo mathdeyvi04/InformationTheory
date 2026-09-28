@@ -89,7 +89,7 @@ int main(int argc, char* argv[]) {
     std::vector<uint8_t> data = (mode == 0) ? algorithm->apply(read_from_input) : algorithm->deapply(read_from_input);
     if(read_from_input.size() != 0 && data.size() == 0) {
         // Esse erro é muito mais comum em situações de descompactação.
-        std::cout << "Houve erro na descompactação. Talvez não seja um arquivo .HF" << std::endl;
+        std::cout << "Houve erro na descompactação" << std::endl;
         return 1;
     }
     File outputfile {outputfilename, false};

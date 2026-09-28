@@ -186,7 +186,7 @@ class MemoryUsage(TestClass):
                     ax.set_yscale("log")
                     ax.set_ylim(bottom=1)
                     ax.set_xscale("log")
-                    ax.set_xlim(left=1)  # log não aceita 0
+                    ax.set_xlim(left=0.1)  # log não aceita 0
 
                     ax.grid(which="both", linestyle="--", alpha=0.35)
                     ax.set_axisbelow(True)
